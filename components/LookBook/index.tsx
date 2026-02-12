@@ -102,36 +102,45 @@ export const LookBook = () => {
 
   return (
     <div className="relative" onClick={handleGridClick}>
-      <div className="grid grid-cols-4 grid-rows-6 h-[90vh] w-[60vh] border border-black">
-        {Array.from({ length: 24 }).map((_, i) => {
-          const idx = i + 1;
-          const isHovered = hoveredIndex === idx;
-          const isActive = activeIndex === idx;
-          return (
-            <div
-              key={i}
-              className="relative border border-black overflow-visible flex items-center justify-center group w-full h-full"
-              onClick={(e) => handleCellClick(e, idx)}
-              onMouseEnter={() => setHoveredIndex(idx)}
-              onMouseLeave={() => setHoveredIndex(null)}
-            >
-              {!(isActive && !isClosing) && (
-                <img
-                  src="/bulbasaur.png"
-                  alt={`Look ${idx}`}
-                  className="transform transition-transform duration-400 ease-out group-hover:scale-150 group-hover:z-10"
-                  style={{
-                    width: "80%",
-                    height: "80%",
-                    objectFit: "cover",
-                    filter: isActive || isHovered ? "none" : "grayscale(100%)",
-                    transition: "transform 400ms ease, filter 300ms ease",
-                  }}
-                />
-              )}
-            </div>
-          );
-        })}
+      <div className="w-full flex justify-center px-4 sm:px-6 md:px-8">
+        <div
+          className="grid grid-cols-4 grid-rows-6
+      w-full
+      max-w-[55vh]
+      aspect-[2/3]
+      border border-black"
+        >
+          {Array.from({ length: 24 }).map((_, i) => {
+            const idx = i + 1;
+            const isHovered = hoveredIndex === idx;
+            const isActive = activeIndex === idx;
+            return (
+              <div
+                key={i}
+                className="relative border border-black overflow-visible flex items-center justify-center group w-full h-full"
+                onClick={(e) => handleCellClick(e, idx)}
+                onMouseEnter={() => setHoveredIndex(idx)}
+                onMouseLeave={() => setHoveredIndex(null)}
+              >
+                {!(isActive && !isClosing) && (
+                  <img
+                    src="/bulbasaur.png"
+                    alt={`Look ${idx}`}
+                    className="transform transition-transform duration-400 ease-out group-hover:scale-150 group-hover:z-10"
+                    style={{
+                      width: "80%",
+                      height: "80%",
+                      objectFit: "cover",
+                      filter:
+                        isActive || isHovered ? "none" : "grayscale(100%)",
+                      transition: "transform 400ms ease, filter 300ms ease",
+                    }}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {overlayStyle && (

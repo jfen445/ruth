@@ -24,7 +24,13 @@ const Video = () => {
         isVisible ? "opacity-100" : "opacity-0"
       }`}
     >
-      <video autoPlay muted className="max-h-full max-w-full object-contain">
+      <video
+        autoPlay
+        muted
+        playsInline
+        loop
+        className="h-full w-full object-cover"
+      >
         <source src="/ruthvideo.mp4" type="video/mp4" />
         Your browser does not support the video tag.
       </video>
