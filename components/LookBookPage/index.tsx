@@ -1,5 +1,4 @@
-import React from "react";
-import { LookBook } from "../LookBook";
+import LookBook from "../LookBook";
 import MenuBar from "../MenuBar";
 
 const LookBookPage = () => {
