@@ -13,8 +13,18 @@ const LookBook = () => {
     (React.CSSProperties & { transition?: string }) | null
   >(null);
   const [isClosing, setIsClosing] = React.useState(false);
+  const [gap, setGap] = React.useState(10);
   const fromRectRef = React.useRef<Rect | null>(null);
   const overlayRef = React.useRef<HTMLImageElement | null>(null);
+
+  React.useEffect(() => {
+    const updateGap = () => {
+      setGap(window.innerWidth < 768 ? 10 : 200);
+    };
+    updateGap();
+    window.addEventListener("resize", updateGap);
+    return () => window.removeEventListener("resize", updateGap);
+  }, []);
 
   // helper used when we change the centred image via carets so the closing
   // animation targets the correct grid cell instead of the originally
@@ -91,9 +101,29 @@ const LookBook = () => {
     };
     fromRectRef.current = fromRect;
 
-    // target is centered and 2x scale
-    const targetW = rect.width * 2;
-    const targetH = rect.height * 2;
+    // Get natural dimensions to preserve aspect ratio
+    const naturalWidth = img.naturalWidth;
+    const naturalHeight = img.naturalHeight;
+    const aspectRatio = naturalWidth / naturalHeight;
+
+    // Calculate target size preserving aspect ratio
+    const scale = 0.3;
+    let targetW = naturalWidth * scale;
+    let targetH = naturalHeight * scale;
+
+    // Cap to screen size
+    const maxW = window.innerWidth * 0.9;
+    const maxH = window.innerHeight * 0.9;
+
+    if (targetW > maxW) {
+      targetW = maxW;
+      targetH = targetW / aspectRatio;
+    }
+    if (targetH > maxH) {
+      targetH = maxH;
+      targetW = targetH * aspectRatio;
+    }
+
     const targetLeft = scrollX + (window.innerWidth - targetW) / 2;
     const targetTop = scrollY + (window.innerHeight - targetH) / 2;
 
@@ -119,8 +149,9 @@ const LookBook = () => {
           width: targetW,
           height: targetH,
           position: "absolute",
-          transition: "all 300ms ease",
+          transition: "all 500ms ease-in-out",
           zIndex: 9999,
+          opacity: 1,
         });
       });
     });
@@ -155,7 +186,6 @@ const LookBook = () => {
     // width/height of the caret element; keep in sync with the
     // Tailwind class used on the icon (w-20 → 80px currently).
     const caretSize = 80;
-    const gap = 10; // space between image and caret
     leftCaretStyle = {
       position: "absolute",
       // place the *right edge* of the left caret gap pixels left of the
@@ -177,7 +207,7 @@ const LookBook = () => {
   return (
     <div className="relative" onClick={handleGridClick}>
       <div className="w-full flex justify-center px-4 sm:px-6 md:px-8">
-        <div className="grid grid-cols-4 grid-rows-6 w-full max-w-[55vh] aspect-[2/3] border border-black">
+        <div className="grid grid-cols-4 grid-rows-6 w-full max-w-[55vh] aspect-[2/3] border border-gray-500">
           {LookBookImages.map((img, i) => {
             const idx = i + 1;
             const isHovered = hoveredIndex === idx;
@@ -186,7 +216,7 @@ const LookBook = () => {
               <div
                 key={i}
                 data-idx={idx}
-                className="relative border border-black overflow-visible flex items-center justify-center group w-full h-full"
+                className="relative border border-gray-500 overflow-visible flex items-center justify-center group w-full h-full"
                 onClick={(e) => handleCellClick(e, idx)}
                 onMouseEnter={() => setHoveredIndex(idx)}
                 onMouseLeave={() => setHoveredIndex(null)}
@@ -196,10 +226,12 @@ const LookBook = () => {
                     <img
                       src={img}
                       alt={`Look ${idx}`}
-                      className={`transform transition-transform duration-400 ease-out group-hover:scale-200 group-hover:z-10 ${isActive || isHovered ? "opacity-100" : "opacity-40"}`}
+                      className={`transform transition-transform duration-2000 ease-out group-hover:scale-200 group-hover:z-10 ${isActive || isHovered ? "opacity-100" : "opacity-20"}`}
                       style={{
-                        width: "80%",
-                        height: "80%",
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        objectPosition: "top",
                       }}
                     />
                   </>
@@ -229,6 +261,7 @@ const LookBook = () => {
                       top: fromRectRef.current!.top,
                       width: fromRectRef.current!.width,
                       height: fromRectRef.current!.height,
+                      opacity: 0,
                     }
                   : prev,
               );
@@ -243,6 +276,7 @@ const LookBook = () => {
                   src="/icon-caret.svg"
                   alt=""
                   className="w-20 -rotate-90"
+                  style={{ filter: "brightness(0) saturate(100%) invert(50%)" }}
                   onClick={(e) => {
                     e.stopPropagation();
                     handlePrev(e as any);
@@ -254,6 +288,7 @@ const LookBook = () => {
                   src="/icon-caret.svg"
                   alt=""
                   className="w-20 rotate-90"
+                  style={{ filter: "brightness(0) saturate(100%) invert(50%)" }}
                   onClick={(e) => {
                     e.stopPropagation();
                     handleNext(e as any);

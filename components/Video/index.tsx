@@ -3,8 +3,13 @@
 import React from "react";
 
 const Video = () => {
-  const [isMounted, setIsMounted] = React.useState(true);
-  const [isVisible, setIsVisible] = React.useState(true);
+  console.log("hiii", process.env.NEXT_PUBLIC_SHOW_VIDEO);
+  const [isMounted, setIsMounted] = React.useState(
+    process.env.NEXT_PUBLIC_SHOW_VIDEO === "true",
+  );
+  const [isVisible, setIsVisible] = React.useState(
+    process.env.NEXT_PUBLIC_SHOW_VIDEO === "true",
+  );
 
   const screenClicked = () => {
     setIsVisible(false);
