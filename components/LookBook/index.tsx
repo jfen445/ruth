@@ -111,8 +111,8 @@ const LookBook = () => {
     let targetW = naturalWidth * scale;
     let targetH = naturalHeight * scale;
 
-    // Cap to screen size
-    const maxW = window.innerWidth * 0.9;
+    // Cap to screen size - limit to 60% width for mobile
+    const maxW = window.innerWidth * 0.6;
     const maxH = window.innerHeight * 0.9;
 
     if (targetW > maxW) {
@@ -124,8 +124,12 @@ const LookBook = () => {
       targetW = targetH * aspectRatio;
     }
 
+    // Calculate target position - center horizontally, center vertically on the grid
+    const gridElement = document.querySelector(".grid") as HTMLElement;
+    const gridRect = gridElement.getBoundingClientRect();
+    const gridCenterY = gridRect.top + gridRect.height / 2 + scrollY;
     const targetLeft = scrollX + (window.innerWidth - targetW) / 2;
-    const targetTop = scrollY + (window.innerHeight - targetH) / 2;
+    const targetTop = gridCenterY - targetH / 2;
 
     // set initial overlay at the source position without transition
     setOverlayStyle({
@@ -189,16 +193,16 @@ const LookBook = () => {
     leftCaretStyle = {
       position: "absolute",
       // place the *right edge* of the left caret gap pixels left of the
-      // image's left edge
-      left: l - caretSize - gap,
+      // image's left edge, but ensure it's not off-screen
+      left: Math.max(0, l - caretSize - gap),
       top: t + h / 2 - caretSize / 2,
       pointerEvents: "auto",
     };
     rightCaretStyle = {
       position: "absolute",
       // place the *left edge* of the right caret gap pixels right of the
-      // image's right edge (spacing is independent of caret width)
-      left: l + w + gap,
+      // image's right edge (spacing is independent of caret width), but ensure it's not off-screen
+      left: Math.min(window.innerWidth - caretSize, l + w + gap),
       top: t + h / 2 - caretSize / 2,
       pointerEvents: "auto",
     };
