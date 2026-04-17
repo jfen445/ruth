@@ -14,8 +14,10 @@ const LookBook = () => {
   >(null);
   const [isClosing, setIsClosing] = React.useState(false);
   const [gap, setGap] = React.useState(10);
+  const [gridRect, setGridRect] = React.useState<Rect | null>(null);
   const fromRectRef = React.useRef<Rect | null>(null);
   const overlayRef = React.useRef<HTMLImageElement | null>(null);
+  const gridRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     const updateGap = () => {
@@ -26,6 +28,22 @@ const LookBook = () => {
     return () => window.removeEventListener("resize", updateGap);
   }, []);
 
+  React.useEffect(() => {
+    const updateGridRect = () => {
+      if (!gridRef.current) return;
+      const rect = gridRef.current.getBoundingClientRect();
+      setGridRect({
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+      });
+    };
+    updateGridRect();
+    window.addEventListener("resize", updateGridRect);
+    return () => window.removeEventListener("resize", updateGridRect);
+  }, []);
+
   // helper used when we change the centred image via carets so the closing
   // animation targets the correct grid cell instead of the originally
   // clicked one.
@@ -33,22 +51,21 @@ const LookBook = () => {
     const cellImg = document.querySelector(
       `[data-idx="${idx}"] img`,
     ) as HTMLImageElement | null;
-    if (!cellImg) return;
-    const rect = cellImg.getBoundingClientRect();
-    const scrollX = window.scrollX || window.pageXOffset;
-    const scrollY = window.scrollY || window.pageYOffset;
+    if (!cellImg || !gridRef.current) return;
+    const cellRect = cellImg.getBoundingClientRect();
+    const gridBounds = gridRef.current.getBoundingClientRect();
     fromRectRef.current = {
-      left: rect.left + scrollX,
-      top: rect.top + scrollY,
-      width: rect.width,
-      height: rect.height,
+      left: cellRect.left - gridBounds.left,
+      top: cellRect.top - gridBounds.top,
+      width: cellRect.width,
+      height: cellRect.height,
     };
   };
 
   // handlers for the carets – replace contents with whatever behaviour you want
   const handlePrev = (e: React.MouseEvent) => {
     e.stopPropagation();
-    console.log("left caret clicked");
+
     if (activeIndex && activeIndex > 1) {
       const newIndex = activeIndex - 1;
       setActiveIndex(newIndex);
@@ -60,7 +77,7 @@ const LookBook = () => {
 
   const handleNext = (e: React.MouseEvent) => {
     e.stopPropagation();
-    console.log("right caret clicked");
+
     if (activeIndex && activeIndex < gridItems.length) {
       const newIndex = activeIndex + 1;
       setActiveIndex(newIndex);
@@ -68,7 +85,9 @@ const LookBook = () => {
     }
   };
 
-  const handleGridClick = () => {
+  const overlayContainerRef = React.useRef<HTMLDivElement>(null);
+
+  const handleCloseOverlay = () => {
     // close by animating back to source
     if (!fromRectRef.current || !overlayStyle) return;
     setIsClosing(true);
@@ -80,24 +99,36 @@ const LookBook = () => {
             top: fromRectRef.current!.top,
             width: fromRectRef.current!.width,
             height: fromRectRef.current!.height,
+            opacity: 0,
           }
         : prev,
     );
   };
 
+  // Handle backdrop clicks to close overlay
+  const handleBackdropClick = (e: React.MouseEvent) => {
+    // Only close if clicking on the backdrop itself, not on overlay content
+    if (e.target === e.currentTarget) {
+      handleCloseOverlay();
+    }
+  };
+
   const handleCellClick = (e: React.MouseEvent, idx: number) => {
     e.stopPropagation();
+    if (!gridRef.current) return;
+
     const cell = e.currentTarget as HTMLElement;
     const img = cell.querySelector("img") as HTMLImageElement | null;
     if (!img) return;
-    const rect = img.getBoundingClientRect();
-    const scrollX = window.scrollX || window.pageXOffset;
-    const scrollY = window.scrollY || window.pageYOffset;
+
+    const imgRect = img.getBoundingClientRect();
+    const gridBounds = gridRef.current.getBoundingClientRect();
+
     const fromRect = {
-      left: rect.left + scrollX,
-      top: rect.top + scrollY,
-      width: rect.width,
-      height: rect.height,
+      left: imgRect.left - gridBounds.left,
+      top: imgRect.top - gridBounds.top,
+      width: imgRect.width,
+      height: imgRect.height,
     };
     fromRectRef.current = fromRect;
 
@@ -107,29 +138,22 @@ const LookBook = () => {
     const aspectRatio = naturalWidth / naturalHeight;
 
     // Calculate target size preserving aspect ratio
-    const scale = 0.3;
-    let targetW = naturalWidth * scale;
-    let targetH = naturalHeight * scale;
+    // Scale relative to grid width
+    const gridWidth = gridBounds.width;
+    const gridHeight = gridBounds.height;
+    const scale = 0.6; // 60% of grid width
+    let targetW = gridWidth * scale;
+    let targetH = targetW / aspectRatio;
 
-    // Cap to screen size - limit to 60% width for mobile
-    const maxW = window.innerWidth * 0.6;
-    const maxH = window.innerHeight * 0.9;
-
-    if (targetW > maxW) {
-      targetW = maxW;
-      targetH = targetW / aspectRatio;
-    }
-    if (targetH > maxH) {
-      targetH = maxH;
+    // Cap to grid size
+    if (targetH > gridHeight * 0.9) {
+      targetH = gridHeight * 0.9;
       targetW = targetH * aspectRatio;
     }
 
-    // Calculate target position - center horizontally, center vertically on the grid
-    const gridElement = document.querySelector(".grid") as HTMLElement;
-    const gridRect = gridElement.getBoundingClientRect();
-    const gridCenterY = gridRect.top + gridRect.height / 2 + scrollY;
-    const targetLeft = scrollX + (window.innerWidth - targetW) / 2;
-    const targetTop = gridCenterY - targetH / 2;
+    // Calculate target position - center within grid
+    const targetLeft = (gridWidth - targetW) / 2;
+    const targetTop = (gridHeight - targetH) / 2;
 
     // set initial overlay at the source position without transition
     setOverlayStyle({
@@ -137,9 +161,8 @@ const LookBook = () => {
       top: fromRect.top,
       width: fromRect.width,
       height: fromRect.height,
-      position: "absolute",
       transition: "none",
-      zIndex: 9999,
+      opacity: 1,
     });
     setIsClosing(false);
     setActiveIndex(idx);
@@ -152,9 +175,7 @@ const LookBook = () => {
           top: targetTop,
           width: targetW,
           height: targetH,
-          position: "absolute",
           transition: "all 500ms ease-in-out",
-          zIndex: 9999,
           opacity: 1,
         });
       });
@@ -178,143 +199,204 @@ const LookBook = () => {
     }
   };
 
-  // calculate caret positions from the overlay rectangle
-  let leftCaretStyle: React.CSSProperties = {};
-  let rightCaretStyle: React.CSSProperties = {};
-  if (overlayStyle) {
+  // calculate overlay image and caret positions using transform
+  let overlayTransform = "translate(0, 0)";
+  let overlayOpacity = 0;
+  let leftCaretTransform = "translate(0, 0)";
+  let rightCaretTransform = "translate(0, 0)";
+  let caretSize = 0;
+
+  if (overlayStyle && gridRect) {
     const l = Number(overlayStyle.left);
     const t = Number(overlayStyle.top);
     const h = Number(overlayStyle.height);
     const w = Number(overlayStyle.width);
-    // width/height of the caret element; keep in sync with the
-    // width/height of the caret element; keep in sync with the
-    // Tailwind class used on the icon (w-20 → 80px currently).
-    const caretSize = 80;
-    leftCaretStyle = {
-      position: "absolute",
-      // place the *right edge* of the left caret gap pixels left of the
-      // image's left edge, but ensure it's not off-screen
-      left: Math.max(0, l - caretSize - gap),
-      top: t + h / 2 - caretSize / 2,
-      pointerEvents: "auto",
-    };
-    rightCaretStyle = {
-      position: "absolute",
-      // place the *left edge* of the right caret gap pixels right of the
-      // image's right edge (spacing is independent of caret width), but ensure it's not off-screen
-      left: Math.min(window.innerWidth - caretSize, l + w + gap),
-      top: t + h / 2 - caretSize / 2,
-      pointerEvents: "auto",
-    };
+    overlayOpacity = Number(overlayStyle.opacity) || 1;
+
+    const isMobile = window.innerWidth < 768;
+
+    // Scale caret size based on screen size
+    caretSize = isMobile ? gridRect.width * 0.08 : gridRect.width * 0.12;
+
+    // Spacing relative to the enlarged image width
+    const imageRelativeGap = w * (isMobile ? 0.05 : 0.1);
+
+    // Position overlay relative to grid origin
+    overlayTransform = `translate(${l}px, ${t}px)`;
+
+    if (isMobile) {
+      // Mobile: carets positioned within grid borders, spaced relative to image
+      leftCaretTransform = `translate(${imageRelativeGap}px, ${t + h / 2 - caretSize / 2}px)`;
+      rightCaretTransform = `translate(${gridRect.width - caretSize - imageRelativeGap}px, ${t + h / 2 - caretSize / 2}px)`;
+    } else {
+      // Desktop: carets positioned outside grid borders
+      leftCaretTransform = `translate(${l - caretSize - imageRelativeGap}px, ${t + h / 2 - caretSize / 2}px)`;
+      rightCaretTransform = `translate(${l + w + imageRelativeGap}px, ${t + h / 2 - caretSize / 2}px)`;
+    }
   }
 
   return (
-    <div className="relative" onClick={handleGridClick}>
+    <>
+      {overlayStyle && (
+        <div
+          className="fixed inset-0 z-[5]"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              handleCloseOverlay();
+            }
+          }}
+        />
+      )}
       <div className="w-full flex justify-center px-4 sm:px-6 md:px-8">
-        <div className="grid grid-cols-4 grid-rows-6 w-full max-w-[55vh] aspect-[2/3] border border-gray-500">
-          {LookBookImages.map((img, i) => {
-            const idx = i + 1;
-            const isHovered = hoveredIndex === idx;
-            const isActive = activeIndex === idx;
-            return (
+        <div
+          ref={gridRef}
+          className="relative w-full max-w-[55vh] aspect-[2/3]"
+        >
+          {/* Grid */}
+          <div className="grid grid-cols-4 grid-rows-6 w-full h-full border border-gray-500 relative z-0">
+            {LookBookImages.map((img, i) => {
+              const idx = i + 1;
+              const isHovered = hoveredIndex === idx;
+              const isActive = activeIndex === idx;
+              return (
+                <div
+                  key={i}
+                  data-idx={idx}
+                  className="relative border border-gray-500 overflow-visible flex items-center justify-center group w-full h-full"
+                  onClick={(e) => handleCellClick(e, idx)}
+                  onMouseEnter={() => setHoveredIndex(idx)}
+                  onMouseLeave={() => setHoveredIndex(null)}
+                >
+                  <img
+                    src={img}
+                    alt={`Look ${idx}`}
+                    className={`transform transition-transform duration-2000 ease-out group-hover:scale-200 group-hover:z-10 transition-opacity duration-500 ease-in-out`}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      objectPosition: "top",
+                      opacity: isActive ? 0 : isHovered ? 1 : 0.2,
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Overlay container - positioned relative to grid */}
+          {overlayStyle && (
+            <div className="absolute inset-0 z-10 pointer-events-none">
+              {/* background click area - close overlay when clicking inside grid */}
               <div
-                key={i}
-                data-idx={idx}
-                className="relative border border-gray-500 overflow-visible flex items-center justify-center group w-full h-full"
-                onClick={(e) => handleCellClick(e, idx)}
-                onMouseEnter={() => setHoveredIndex(idx)}
-                onMouseLeave={() => setHoveredIndex(null)}
-              >
-                {!(isActive && !isClosing) && (
-                  <>
-                    <img
-                      src={img}
-                      alt={`Look ${idx}`}
-                      className={`transform transition-transform duration-2000 ease-out group-hover:scale-200 group-hover:z-10 ${isActive || isHovered ? "opacity-100" : "opacity-20"}`}
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                        objectPosition: "top",
+                className="absolute inset-0"
+                style={{ pointerEvents: "auto" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCloseOverlay();
+                }}
+              />
+
+              {/* Overlay image */}
+              <img
+                ref={(el) => {
+                  overlayRef.current = el;
+                }}
+                src={LookBookImages[activeIndex! - 1]}
+                alt="enlarged"
+                style={{
+                  width: Number(overlayStyle.width),
+                  height: Number(overlayStyle.height),
+                  objectFit: "cover",
+                  objectPosition: "top",
+                  pointerEvents: "auto",
+                  position: "absolute",
+                  transform: overlayTransform,
+                  opacity: overlayOpacity,
+                  transition: overlayStyle.transition,
+                  zIndex: 9999,
+                  top: 0,
+                  left: 0,
+                }}
+                onTransitionEnd={handleOverlayTransitionEnd}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCloseOverlay();
+                }}
+              />
+
+              {/* left/right carets (don't render while closing) */}
+              {!isClosing && (
+                <>
+                  <div
+                    style={{
+                      position: "absolute",
+                      transform: leftCaretTransform,
+                      pointerEvents: "auto",
+                      width: caretSize,
+                      height: caretSize,
+                      top: 0,
+                      left: 0,
+                      zIndex: 9999,
+                    }}
+                  >
+                    <svg
+                      className="text-gray-400 hover:text-gray-600 cursor-pointer transition-colors"
+                      style={{ width: "100%", height: "100%" }}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handlePrev(e as any);
                       }}
-                    />
-                  </>
-                )}
-              </div>
-            );
-          })}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15 19l-7-7 7-7"
+                      />
+                    </svg>
+                  </div>
+                  <div
+                    style={{
+                      position: "absolute",
+                      transform: rightCaretTransform,
+                      pointerEvents: "auto",
+                      width: caretSize,
+                      height: caretSize,
+                      top: 0,
+                      left: 0,
+                      zIndex: 9999,
+                    }}
+                  >
+                    <svg
+                      className="text-gray-400 hover:text-gray-600 cursor-pointer transition-colors"
+                      style={{ width: "100%", height: "100%" }}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleNext(e as any);
+                      }}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
-
-      {overlayStyle && (
-        <div className="fixed inset-0 z-[9998] pointer-events-none">
-          {/* background click area */}
-          <div
-            className="absolute inset-0"
-            style={{ pointerEvents: "auto" }}
-            onClick={(e) => {
-              // clicking the dark background should start a closing animation
-              e.stopPropagation();
-              if (!fromRectRef.current) return;
-              setIsClosing(true);
-              setOverlayStyle((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      left: fromRectRef.current!.left,
-                      top: fromRectRef.current!.top,
-                      width: fromRectRef.current!.width,
-                      height: fromRectRef.current!.height,
-                      opacity: 0,
-                    }
-                  : prev,
-              );
-            }}
-          />
-
-          {/* left/right carets (don’t render while closing) */}
-          {!isClosing && (
-            <>
-              <div style={leftCaretStyle}>
-                <img
-                  src="/icon-caret.svg"
-                  alt=""
-                  className="w-20 -rotate-90"
-                  style={{ filter: "brightness(0) saturate(100%) invert(50%)" }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handlePrev(e as any);
-                  }}
-                />
-              </div>
-              <div style={rightCaretStyle}>
-                <img
-                  src="/icon-caret.svg"
-                  alt=""
-                  className="w-20 rotate-90"
-                  style={{ filter: "brightness(0) saturate(100%) invert(50%)" }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleNext(e as any);
-                  }}
-                />
-              </div>
-            </>
-          )}
-
-          {/* enlarged image */}
-          <img
-            ref={(el) => {
-              overlayRef.current = el;
-            }}
-            src={LookBookImages[activeIndex! - 1]}
-            alt="enlarged"
-            style={overlayStyle}
-            onTransitionEnd={handleOverlayTransitionEnd}
-          />
-        </div>
-      )}
-    </div>
+    </>
   );
 };
 

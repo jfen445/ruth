@@ -3,7 +3,6 @@
 import React from "react";
 
 const Video = () => {
-  console.log("hiii", process.env.NEXT_PUBLIC_SHOW_VIDEO);
   const [isMounted, setIsMounted] = React.useState(
     process.env.NEXT_PUBLIC_SHOW_VIDEO === "true",
   );
