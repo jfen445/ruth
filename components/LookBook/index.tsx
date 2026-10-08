@@ -5,6 +5,39 @@ import { LookBookImages } from "./images";
 
 type Rect = { left: number; top: number; width: number; height: number };
 
+const OVERLAY_TRANSITION = "all 500ms ease-in-out";
+
+// How much a grid image grows on hover. Tune to taste.
+const HOVER_SCALE = 1.5;
+
+// How long the hover zoom and colour fade take, in ms. Shared so the colour
+// finishes filling in exactly as the image reaches full size.
+const HOVER_DURATION = 700;
+
+// Where the enlarged image sits, in pixels relative to the grid box. Derived
+// from the grid's current size, so it can be recomputed whenever that changes.
+const centeredRect = (
+  aspectRatio: number,
+  gridWidth: number,
+  gridHeight: number,
+): Rect => {
+  let width = gridWidth * 0.6; // 60% of grid width
+  let height = width / aspectRatio;
+
+  // cap to grid size
+  if (height > gridHeight * 0.9) {
+    height = gridHeight * 0.9;
+    width = height * aspectRatio;
+  }
+
+  return {
+    left: (gridWidth - width) / 2,
+    top: (gridHeight - height) / 2,
+    width,
+    height,
+  };
+};
+
 const LookBook = () => {
   const gridItems = Array.from({ length: 24 }, (_, i) => i + 1);
   const [activeIndex, setActiveIndex] = React.useState<number | null>(null);
@@ -13,25 +46,19 @@ const LookBook = () => {
     (React.CSSProperties & { transition?: string }) | null
   >(null);
   const [isClosing, setIsClosing] = React.useState(false);
-  const [gap, setGap] = React.useState(10);
   const [gridRect, setGridRect] = React.useState<Rect | null>(null);
   const fromRectRef = React.useRef<Rect | null>(null);
   const overlayRef = React.useRef<HTMLImageElement | null>(null);
   const gridRef = React.useRef<HTMLDivElement | null>(null);
 
+  // The grid is sized by container queries, so it can change size without the
+  // window firing a resize event. Observe the box itself instead.
   React.useEffect(() => {
-    const updateGap = () => {
-      setGap(window.innerWidth < 768 ? 10 : 200);
-    };
-    updateGap();
-    window.addEventListener("resize", updateGap);
-    return () => window.removeEventListener("resize", updateGap);
-  }, []);
+    const grid = gridRef.current;
+    if (!grid) return;
 
-  React.useEffect(() => {
     const updateGridRect = () => {
-      if (!gridRef.current) return;
-      const rect = gridRef.current.getBoundingClientRect();
+      const rect = grid.getBoundingClientRect();
       setGridRect({
         left: rect.left,
         top: rect.top,
@@ -39,9 +66,15 @@ const LookBook = () => {
         height: rect.height,
       });
     };
+
     updateGridRect();
+    const observer = new ResizeObserver(updateGridRect);
+    observer.observe(grid);
     window.addEventListener("resize", updateGridRect);
-    return () => window.removeEventListener("resize", updateGridRect);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateGridRect);
+    };
   }, []);
 
   // helper used when we change the centred image via carets so the closing
@@ -61,6 +94,60 @@ const LookBook = () => {
       height: cellRect.height,
     };
   };
+
+  // The overlay's position is stored as pixels measured at click time, so it
+  // has to be recomputed whenever the grid box changes size — otherwise the
+  // centred image keeps its old geometry and drifts off-centre on resize.
+  React.useEffect(() => {
+    const grid = gridRef.current;
+    if (grid === null || activeIndex === null || isClosing) return;
+
+    // Start from the current size, not null: ResizeObserver fires once on
+    // observe(), and if that first call got through it would snap the overlay
+    // straight to the centre, skipping the open animation. That only showed up
+    // once the image was cached — on a first open naturalWidth is still 0 and
+    // recenter bails out early.
+    const initial = grid.getBoundingClientRect();
+    let lastWidth: number | null = initial.width;
+    let lastHeight: number | null = initial.height;
+
+    const recenter = () => {
+      const img = overlayRef.current;
+      if (!img || !img.naturalWidth) return;
+
+      const bounds = grid.getBoundingClientRect();
+      // ignore any notification that isn't an actual size change
+      if (bounds.width === lastWidth && bounds.height === lastHeight) return;
+      lastWidth = bounds.width;
+      lastHeight = bounds.height;
+
+      // keep the closing animation aimed at the right cell at its new size
+      updateFromRect(activeIndex);
+
+      setOverlayStyle((prev) =>
+        prev
+          ? {
+              ...prev,
+              ...centeredRect(
+                img.naturalWidth / img.naturalHeight,
+                bounds.width,
+                bounds.height,
+              ),
+              // snap rather than animate, so it tracks the drag of a resize
+              transition: "none",
+            }
+          : prev,
+      );
+    };
+
+    const observer = new ResizeObserver(recenter);
+    observer.observe(grid);
+    window.addEventListener("resize", recenter);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", recenter);
+    };
+  }, [activeIndex, isClosing]);
 
   // handlers for the carets – replace contents with whatever behaviour you want
   const handlePrev = (e: React.MouseEvent) => {
@@ -100,6 +187,9 @@ const LookBook = () => {
             width: fromRectRef.current!.width,
             height: fromRectRef.current!.height,
             opacity: 0,
+            // set explicitly: a resize leaves the transition at "none", and
+            // without one the transitionend that unmounts this never fires
+            transition: OVERLAY_TRANSITION,
           }
         : prev,
     );
@@ -132,28 +222,12 @@ const LookBook = () => {
     };
     fromRectRef.current = fromRect;
 
-    // Get natural dimensions to preserve aspect ratio
-    const naturalWidth = img.naturalWidth;
-    const naturalHeight = img.naturalHeight;
-    const aspectRatio = naturalWidth / naturalHeight;
-
-    // Calculate target size preserving aspect ratio
-    // Scale relative to grid width
-    const gridWidth = gridBounds.width;
-    const gridHeight = gridBounds.height;
-    const scale = 0.6; // 60% of grid width
-    let targetW = gridWidth * scale;
-    let targetH = targetW / aspectRatio;
-
-    // Cap to grid size
-    if (targetH > gridHeight * 0.9) {
-      targetH = gridHeight * 0.9;
-      targetW = targetH * aspectRatio;
-    }
-
-    // Calculate target position - center within grid
-    const targetLeft = (gridWidth - targetW) / 2;
-    const targetTop = (gridHeight - targetH) / 2;
+    // Target size/position, preserving the image's natural aspect ratio
+    const target = centeredRect(
+      img.naturalWidth / img.naturalHeight,
+      gridBounds.width,
+      gridBounds.height,
+    );
 
     // set initial overlay at the source position without transition
     setOverlayStyle({
@@ -171,11 +245,8 @@ const LookBook = () => {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         setOverlayStyle({
-          left: targetLeft,
-          top: targetTop,
-          width: targetW,
-          height: targetH,
-          transition: "all 500ms ease-in-out",
+          ...target,
+          transition: OVERLAY_TRANSITION,
           opacity: 1,
         });
       });
@@ -213,25 +284,33 @@ const LookBook = () => {
     const w = Number(overlayStyle.width);
     overlayOpacity = Number(overlayStyle.opacity) || 1;
 
-    const isMobile = window.innerWidth < 768;
-
-    // Scale caret size based on screen size
-    caretSize = isMobile ? gridRect.width * 0.08 : gridRect.width * 0.12;
-
-    // Spacing relative to the enlarged image width
-    const imageRelativeGap = w * (isMobile ? 0.05 : 0.1);
-
     // Position overlay relative to grid origin
     overlayTransform = `translate(${l}px, ${t}px)`;
 
-    if (isMobile) {
-      // Mobile: carets positioned within grid borders, spaced relative to image
-      leftCaretTransform = `translate(${imageRelativeGap}px, ${t + h / 2 - caretSize / 2}px)`;
-      rightCaretTransform = `translate(${gridRect.width - caretSize - imageRelativeGap}px, ${t + h / 2 - caretSize / 2}px)`;
+    const caretTop = t + h / 2;
+
+    // Room between the grid and the viewport edge, on the tighter side.
+    // gridRect is tracked on resize, so this re-decides as the window changes.
+    const sideSpace = Math.min(
+      gridRect.left,
+      window.innerWidth - (gridRect.left + gridRect.width),
+    );
+
+    const outsideCaretSize = gridRect.width * 0.12;
+    const outsideGap = outsideCaretSize * 0.25;
+
+    if (sideSpace >= outsideCaretSize + outsideGap * 2) {
+      // Enough margin: carets sit outside the grid, just clear of its border
+      caretSize = outsideCaretSize;
+      leftCaretTransform = `translate(${-caretSize - outsideGap}px, ${caretTop - caretSize / 2}px)`;
+      rightCaretTransform = `translate(${gridRect.width + outsideGap}px, ${caretTop - caretSize / 2}px)`;
     } else {
-      // Desktop: carets positioned outside grid borders
-      leftCaretTransform = `translate(${l - caretSize - imageRelativeGap}px, ${t + h / 2 - caretSize / 2}px)`;
-      rightCaretTransform = `translate(${l + w + imageRelativeGap}px, ${t + h / 2 - caretSize / 2}px)`;
+      // No margin to spare: carets sit within the grid, spaced relative to
+      // the enlarged image
+      caretSize = gridRect.width * 0.08;
+      const imageRelativeGap = w * 0.05;
+      leftCaretTransform = `translate(${imageRelativeGap}px, ${caretTop - caretSize / 2}px)`;
+      rightCaretTransform = `translate(${gridRect.width - caretSize - imageRelativeGap}px, ${caretTop - caretSize / 2}px)`;
     }
   }
 
@@ -247,13 +326,17 @@ const LookBook = () => {
           }}
         />
       )}
-      <div className="w-full flex justify-center px-4 sm:px-6 md:px-8">
+      <div className="h-full w-full flex items-center justify-center [container-type:size]">
+        {/* Sized from whichever axis runs out first: the available width, or
+            the available height of this area (100cqh) via the 2:3 ratio. */}
         <div
           ref={gridRef}
-          className="relative w-full max-w-[55vh] aspect-[2/3]"
+          className="relative aspect-[2/3] w-full max-w-[calc(100cqh*2/3)]"
         >
-          {/* Grid */}
-          <div className="grid grid-cols-4 grid-rows-6 w-full h-full border border-gray-500 relative z-0">
+          {/* Grid. The 1px gaps let the grid's own background show through,
+              so every seam is a single hairline instead of two cell borders
+              stacking into a 2px band. */}
+          <div className="grid grid-cols-4 grid-rows-6 gap-px w-full h-full bg-gray-500 border border-gray-500 relative z-0">
             {LookBookImages.map((img, i) => {
               const idx = i + 1;
               const isHovered = hoveredIndex === idx;
@@ -262,7 +345,10 @@ const LookBook = () => {
                 <div
                   key={i}
                   data-idx={idx}
-                  className="relative border border-gray-500 overflow-visible flex items-center justify-center group w-full h-full"
+                  className="relative bg-white overflow-visible flex items-center justify-center w-full h-full"
+                  // lift the hovered cell so its enlarged image sits above its
+                  // neighbours instead of under the ones later in the grid
+                  style={{ zIndex: isHovered ? 10 : undefined }}
                   onClick={(e) => handleCellClick(e, idx)}
                   onMouseEnter={() => setHoveredIndex(idx)}
                   onMouseLeave={() => setHoveredIndex(null)}
@@ -270,13 +356,25 @@ const LookBook = () => {
                   <img
                     src={img}
                     alt={`Look ${idx}`}
-                    className={`transform transition-transform duration-2000 ease-out group-hover:scale-200 group-hover:z-10 transition-opacity duration-500 ease-in-out`}
+                    // Scale is driven from the same hover state as opacity
+                    // rather than a group-hover class, so the two always stay
+                    // in step and can't be dropped by a stale CSS build.
                     style={{
                       width: "100%",
                       height: "100%",
                       objectFit: "cover",
                       objectPosition: "top",
                       opacity: isActive ? 0 : isHovered ? 1 : 0.2,
+                      transform:
+                        isHovered && !isActive
+                          ? `scale(${HOVER_SCALE})`
+                          : "scale(1)",
+                      // On hover the colour eases in over the whole zoom, so it
+                      // is still filling in as the image reaches full size
+                      // rather than snapping on at the start of it.
+                      transition: `transform ${HOVER_DURATION}ms ease-out, opacity ${HOVER_DURATION}ms ${
+                        isHovered ? "ease-in" : "ease-out"
+                      }`,
                     }}
                   />
                 </div>
